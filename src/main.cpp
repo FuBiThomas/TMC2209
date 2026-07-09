@@ -25,6 +25,8 @@
 #define EN_PIN 9         // LOW = Aktiv, HIGH = Deaktiviert
 #define STEP_PIN 10      // Step pin
 #define DIR_PIN 11       // Direction pin
+// Encoder index input
+#define INDEX_PIN 2      // Index signal (Z) des Encoders
 
 // Mechanische Umrechnung
 const long ENCODER_PULSES_PER_REV = 4000;   // Encoder-Quadraturauflösung
@@ -35,7 +37,7 @@ const float SPINDLE_LEAD_MM_PER_REV = 1.0;  // Spindel-Steigung in mm pro Umdreh
 AccelStepper stepper(AccelStepper::DRIVER, STEP_PIN, DIR_PIN);
 
   // Hardware-Modul 1: Phase A an Pin 0, Phase B an Pin 1
-  QuadEncoder meinEncoder(1, 0, 1); 
+  QuadEncoder meinEncoder(1, 0, 1, 0, 4); 
   //Zeitsteuerung für die serielle Ausgabe (alle 100 Millisekunden)
   unsigned long letzteAusgabeZeit = 0;
   const unsigned long ausgabeIntervall = 1000; 
@@ -48,7 +50,15 @@ void setup() {
   Serial.begin(9600); 
 
   meinEncoder.setInitConfig();
+
+  // Aktiviert den Index-Trigger (z.B. bei steigender Flanke des Signals)
+  // Das sorgt dafür, dass die Hardware den Puls JEDES Mal fängt, egal wie schnell er ist.
+  meinEncoder.EncConfig.INDEXTriggerMode = RISING_EDGE;
+  
   meinEncoder.init();
+
+  // Index-Pin konfigurieren (Pullup für sauberen Zustand, je nach Sensor anpassen)
+  pinMode(INDEX_PIN, INPUT_PULLUP);
 
   // Dem Stepper mitteilen, welcher Pin für Enable zuständig ist
   // Das 'true' am Ende ist entscheidend: Es invertiert das Signal! (LOW = Aktiv)
@@ -81,17 +91,32 @@ void loop() {
       if (cmd == "t") { // Test
         Serial.println("Test 12:19Uhr");
       }
+      else if (cmd == "help" || cmd == "?") {
+        Serial.println("Verfügbare Befehle:");
+        Serial.println(" t            - Test");
+        Serial.println(" a            - goto absolute position 10000 (demo)");
+        Serial.println(" h            - go home (position 0)");
+        Serial.println(" r            - move relative (predefined 800)");
+        Serial.println(" g<steps>     - move relative by steps (z.B. g1000 oder g 1000)");
+        Serial.println(" set <param> <value> - set parameters: maxspeed, accel, speed, position, target, enable, minpulse");
+        Serial.println(" get <param>  - get parameters: maxspeed, accel, speed, position, target, distance, running, enabled");
+        Serial.println(" p            - stop (decelerate)");
+      }
       else if (cmd == "a") { // absolute Position 10 000
         Serial.println("Fahre zu absoluter Position: 10000");
-        stepper.moveTo(10000); 
+        stepper.moveTo(18000); 
       }
-      else if (cmd == "h") { // home position
+      else if (cmd == "home") { // home position
         Serial.println("Fahre zu Home-Position: 0");
         stepper.moveTo(0); 
       }
+      else if (cmd == "axis homing") { // home position
+        Serial.println("Achse wird gehomed");
+        stepper.moveTo(0); 
+      }
       else if (cmd == "r") { // relativ +800 Steps
-        Serial.println("Fahre relativ: +800 Steps (halbe Umdrehung)");
-        stepper.move(800); 
+        Serial.println("Fahre relativ: +1600 Steps (ganze Umdrehung)");
+        stepper.move(1600); 
       }
       else if (cmd == "g") { // move relative with parameter
         long steps = 0;
@@ -179,23 +204,46 @@ void loop() {
   // Simultane und blockierfreie Ausgabe im Seriellen Monitor
   unsigned long aktuelleZeit = millis();
   if (aktuelleZeit - letzteAusgabeZeit >= ausgabeIntervall) {
-    letzteAusgabeZeit = aktuelleZeit;
+  letzteAusgabeZeit = aktuelleZeit;
 
-    // Aktuellen Zählerstand direkt aus dem Hardware-Register lesen
-    long encoderPulses = meinEncoder.read();
-    float revolutions = (float)encoderPulses / ENCODER_PULSES_PER_REV;
-    float motorSteps = revolutions * STEPPER_STEPS_PER_REV;
-    float axisPositionMm = revolutions * SPINDLE_LEAD_MM_PER_REV;
+  // 1. Die Rohwerte aus der Hardware
+  long rawPulses = meinEncoder.read();
+  long rawIndex = (short)meinEncoder.getHoldRevolution();
+  
+  // 2. Vorzeichenumkehr
+  long encoderPulses = -rawPulses; 
+  long indexSchritte = -rawIndex;
+  
+  // 3.1 Berechnungen Encoder
+  //float absolutEncoderPosition = (indexSchritte * ENCODER_PULSES_PER_REV) + encoderPulses ; 
 
-    // Ausgabe
-    Serial.print("Encoder-Pulse: ");
-    Serial.print(encoderPulses);
-    Serial.print(" | Motor-Schritte (äquivalent): ");
-    Serial.print(motorSteps, 2);
-    Serial.print(" | Achse: ");
-    Serial.print(axisPositionMm, 2);
-    Serial.println(" mm");
-  }
+  // 3.2 Berechnungen Motor
+  float absolutMotorSteps = stepper.currentPosition();
+  
 
+  // 3.3 Berechnungen Achse
+  float absolutRevolutions = (float)indexSchritte + ((float)encoderPulses / ENCODER_PULSES_PER_REV);  
+  // float revolutions = (float)encoderPulses / ENCODER_PULSES_PER_REV;    // die Angabe ist ein Kommawert zwischen 0 und 1 (oder auch Bruchwert)
+  //float axisPositionMm = (indexSchritte * SPINDLE_LEAD_MM_PER_REV) + (revolutions * SPINDLE_LEAD_MM_PER_REV);
+
+  float absolutEncoderPosition = absolutRevolutions * ENCODER_PULSES_PER_REV;
+  float encoderIstMotorSteps   = absolutRevolutions * STEPPER_STEPS_PER_REV;
+  float axisPositionMm         = absolutRevolutions * SPINDLE_LEAD_MM_PER_REV;
+
+
+  // Ausgabe
+  Serial.print("Absolut Encoder Position : ");
+  Serial.print(absolutEncoderPosition);
+  
+  Serial.print(" | Index-Schritte (Umdrehungen): ");
+  Serial.print(indexSchritte); 
+  
+  Serial.print(" | Motor-Schritte: ");
+  Serial.print(absolutMotorSteps);
+  
+  Serial.print(" | Achse: ");
+  Serial.print(axisPositionMm, 2);
+  Serial.println(" mm");
+}
 
 }
