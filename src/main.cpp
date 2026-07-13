@@ -36,41 +36,42 @@ const float SPINDLE_LEAD_MM_PER_REV = 1.0;  // Spindel-Steigung in mm pro Umdreh
 // AccelStepper Instanz im Driver-Modus
 AccelStepper stepper(AccelStepper::DRIVER, STEP_PIN, DIR_PIN);
 
-  // Hardware-Modul 1: Phase A an Pin 0, Phase B an Pin 1
-  QuadEncoder meinEncoder(1, 0, 1, 0, 4); 
-  //Zeitsteuerung für die serielle Ausgabe (alle 100 Millisekunden)
-  unsigned long letzteAusgabeZeit = 0;
-  const unsigned long ausgabeIntervall = 1000; 
+QuadEncoder meinEncoder(1, 0, 1, 0, 4); // Hardware-Modul 1: Phase A an Pin 0, Phase B an Pin 1
+
+//Zeitsteuerung für die serielle Ausgabe (alle 100 Millisekunden)
+unsigned long letzteAusgabeZeit = 0;
+const unsigned long ausgabeIntervall = 1000; 
   
-  // Laufzeitzustand für get/set Befehle
-  bool outputsEnabled = true;
-  float currentAcceleration = 500.0; // spiegelt zuletzt gesetzte Acceleration wider
+// Laufzeitzustand für get/set Befehle
+bool outputsEnabled = true;
+float currentAcceleration = 500.0; // spiegelt zuletzt gesetzte Acceleration wider
+
+void deviation ();
 
 void setup() {
   Serial.begin(9600); 
 
   meinEncoder.setInitConfig();
 
-  // Aktiviert den Index-Trigger (z.B. bei steigender Flanke des Signals)
-  // Das sorgt dafür, dass die Hardware den Puls JEDES Mal fängt, egal wie schnell er ist.
   meinEncoder.EncConfig.INDEXTriggerMode = RISING_EDGE;
-  
+
   meinEncoder.init();
 
   // Index-Pin konfigurieren (Pullup für sauberen Zustand, je nach Sensor anpassen)
-  pinMode(INDEX_PIN, INPUT_PULLUP);
+  pinMode(INDEX_PIN, INPUT_PULLDOWN);
 
   // Dem Stepper mitteilen, welcher Pin für Enable zuständig ist
   // Das 'true' am Ende ist entscheidend: Es invertiert das Signal! (LOW = Aktiv)
   stepper.setEnablePin(EN_PIN);
-  stepper.setPinsInverted(false, false, true); // (directionInvert, stepInvert, enableInvert)
+  stepper.setPinsInverted(true, false, true); // (directionInvert, stepInvert, enableInvert)
   
   // Jetzt die Ausgänge aktivieren -> Schaltet EN_PIN sauber auf LOW
   stepper.enableOutputs();
 
   // Parameter setzen
-  stepper.setMaxSpeed(4000);     // max Geschwindigkeit
-  stepper.setAcceleration(100);  // Beschleunigung
+  stepper.setMaxSpeed(10000);     // max Geschwindigkeit
+  stepper.setSpeed(6000);
+  stepper.setAcceleration(6000);  // Beschleunigung
 
   stepper.setCurrentPosition(0); // Startposition kalibrieren
 
@@ -89,7 +90,7 @@ void loop() {
       args.trim();
 
       if (cmd == "t") { // Test
-        Serial.println("Test 12:19Uhr");
+        Serial.println("09:52Uhr");
       }
       else if (cmd == "help" || cmd == "?") {
         Serial.println("Verfügbare Befehle:");
@@ -103,8 +104,8 @@ void loop() {
         Serial.println(" p            - stop (decelerate)");
       }
       else if (cmd == "a") { // absolute Position 10 000
-        Serial.println("Fahre zu absoluter Position: 10000");
-        stepper.moveTo(18000); 
+        Serial.println("Fahre zu absoluter Position: 16000");
+        stepper.moveTo(16000); 
       }
       else if (cmd == "home") { // home position
         Serial.println("Fahre zu Home-Position: 0");
@@ -206,44 +207,48 @@ void loop() {
   if (aktuelleZeit - letzteAusgabeZeit >= ausgabeIntervall) {
   letzteAusgabeZeit = aktuelleZeit;
 
-  // 1. Die Rohwerte aus der Hardware
-  long rawPulses = meinEncoder.read();
-  long rawIndex = (short)meinEncoder.getHoldRevolution();
-  
-  // 2. Vorzeichenumkehr
-  long encoderPulses = -rawPulses; 
-  long indexSchritte = -rawIndex;
-  
-  // 3.1 Berechnungen Encoder
-  //float absolutEncoderPosition = (indexSchritte * ENCODER_PULSES_PER_REV) + encoderPulses ; 
-
-  // 3.2 Berechnungen Motor
-  float absolutMotorSteps = stepper.currentPosition();
-  
-
-  // 3.3 Berechnungen Achse
-  float absolutRevolutions = (float)indexSchritte + ((float)encoderPulses / ENCODER_PULSES_PER_REV);  
-  // float revolutions = (float)encoderPulses / ENCODER_PULSES_PER_REV;    // die Angabe ist ein Kommawert zwischen 0 und 1 (oder auch Bruchwert)
-  //float axisPositionMm = (indexSchritte * SPINDLE_LEAD_MM_PER_REV) + (revolutions * SPINDLE_LEAD_MM_PER_REV);
-
-  float absolutEncoderPosition = absolutRevolutions * ENCODER_PULSES_PER_REV;
-  float encoderIstMotorSteps   = absolutRevolutions * STEPPER_STEPS_PER_REV;
-  float axisPositionMm         = absolutRevolutions * SPINDLE_LEAD_MM_PER_REV;
-
+  // Die Rohwerte aus der Hardware
+  long encoderPulses = meinEncoder.read();
+  long indexPulses = (short)meinEncoder.getRevolution();
+ 
+  // Berechnungen Motor
+  long absolutMotorSteps = stepper.currentPosition(); 
 
   // Ausgabe
-  Serial.print("Absolut Encoder Position : ");
-  Serial.print(absolutEncoderPosition);
+  Serial.print("EncoderPulses: ");
+  Serial.print(encoderPulses);
   
-  Serial.print(" | Index-Schritte (Umdrehungen): ");
-  Serial.print(indexSchritte); 
+  Serial.print(" | indexPulses: ");
+  Serial.print(indexPulses); 
   
   Serial.print(" | Motor-Schritte: ");
-  Serial.print(absolutMotorSteps);
-  
-  Serial.print(" | Achse: ");
-  Serial.print(axisPositionMm, 2);
-  Serial.println(" mm");
+  Serial.println(absolutMotorSteps);
 }
+}
+
+
+void deviation () {
+
+// Encoder-Werte
+long encoderPulses = meinEncoder.read();
+long indexPulses = (short)meinEncoder.getRevolution();
+
+// Schrittmotor-Werte
+long absolutMotorSteps = stepper.currentPosition(); 
+
+// Hardware-Konfigurationen Stepper and Encoder
+const long ENCODER_PULSES_PER_REV = 4000;   // Encoder-Quadraturauflösung
+const long STEPPER_STEPS_PER_REV = 1600;    // Stepmotor-Schritte pro Umdrehung
+
+float deviationFactor = STEPPER_STEPS_PER_REV / ENCODER_PULSES_PER_REV ; // current 13.07.2026 -> 1600/4000 Steps/Rev = 0,4
+
+// float deviationThreshold = 4 ; // 16 stepperSteps = 0.01 mm -> minimum accuracy = 0.005mm -> +/- 0.0025mm = 4 Steps
+//float realDeviationFactor = absolutMotorSteps / (ENCODER_PULSES_PER_REV * indexPulses + encoderPulses);
+
+long currentAbsolutEncoderPosition;
+
+long targetAbsolutEncoderPosition;
+
+if ()
 
 }
