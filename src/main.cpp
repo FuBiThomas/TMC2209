@@ -47,6 +47,7 @@ bool outputsEnabled = true;
 float currentAcceleration = 500.0; // spiegelt zuletzt gesetzte Acceleration wider
 
 void deviation ();
+void axisHoming();
 
 void setup() {
   Serial.begin(9600); 
@@ -90,7 +91,7 @@ void loop() {
       args.trim();
 
       if (cmd == "t") { // Test
-        Serial.println("09:52Uhr");
+        Serial.println("15.07.2026 / 11:18Uhr");
       }
       else if (cmd == "help" || cmd == "?") {
         Serial.println("Verfügbare Befehle:");
@@ -111,14 +112,50 @@ void loop() {
         Serial.println("Fahre zu Home-Position: 0");
         stepper.moveTo(0); 
       }
-      else if (cmd == "axis homing") { // home position
-        Serial.println("Achse wird gehomed");
-        stepper.moveTo(0); 
+      else if (cmd == "resetencoder") { // home position
+        Serial.println("Reset Enocer-Pulcounter to zero!");
+        meinEncoder.write(0);                               // Setzt den aktuellen Pulscounter zurück auf 0; 
       }
-      else if (cmd == "r") { // relativ +800 Steps
-        Serial.println("Fahre relativ: +1600 Steps (ganze Umdrehung)");
-        stepper.move(1600); 
+      else if (cmd == "calibration") { // home position
+        Serial.println("calibrate Encoder-Counter with Stepper-Counter");
+        meinEncoder.write(0);                               // Setzt den aktuellen Pulscounter zurück auf 0; 
       }
+      else if (cmd == "axishoming") { // home position
+      Serial.println("Start axis homing ... ");
+      axisHoming (); 
+      }
+      else if (cmd == "1") {
+        Serial.println("Fahre relativ: +100 Steps");
+        stepper.move(100);
+      }
+      else if (cmd == "2") {
+        Serial.println("Fahre relativ: +200 Steps");
+        stepper.move(200);
+      }
+      else if (cmd == "3") {
+        Serial.println("Fahre relativ: +300 Steps");
+        stepper.move(300);
+      }
+      else if (cmd == "4") {
+        Serial.println("Fahre relativ: +400 Steps");
+        stepper.move(400);
+      }
+      else if (cmd == "6") {
+        Serial.println("Fahre relativ: -100 Steps");
+        stepper.move(-100);
+      }
+      else if (cmd == "7") {
+        Serial.println("Fahre relativ: -200 Steps");
+        stepper.move(-200);
+      }
+      else if (cmd == "8") {
+        Serial.println("Fahre relativ: -300 Steps");
+        stepper.move(-300);
+      }
+      else if (cmd == "9") {
+        Serial.println("Fahre relativ: -400 Steps");
+        stepper.move(-400);
+      }      
       else if (cmd == "g") { // move relative with parameter
         long steps = 0;
         if (args.length() > 0) steps = args.toInt();
@@ -205,50 +242,97 @@ void loop() {
   // Simultane und blockierfreie Ausgabe im Seriellen Monitor
   unsigned long aktuelleZeit = millis();
   if (aktuelleZeit - letzteAusgabeZeit >= ausgabeIntervall) {
-  letzteAusgabeZeit = aktuelleZeit;
+    letzteAusgabeZeit = aktuelleZeit;
 
-  // Die Rohwerte aus der Hardware
-  long encoderPulses = meinEncoder.read();
-  long indexPulses = (short)meinEncoder.getRevolution();
- 
-  // Berechnungen Motor
-  long absolutMotorSteps = stepper.currentPosition(); 
+    // Die Rohwerte aus der Hardware
+    long encoderPulses = meinEncoder.read();
+    long indexPulses = (short)meinEncoder.getRevolution();
+    
+    // Berechnungen Motor
+    long absolutMotorSteps = stepper.currentPosition();
 
-  // Ausgabe
-  Serial.print("EncoderPulses: ");
-  Serial.print(encoderPulses);
-  
-  Serial.print(" | indexPulses: ");
-  Serial.print(indexPulses); 
-  
-  Serial.print(" | Motor-Schritte: ");
-  Serial.println(absolutMotorSteps);
+    // Ausgabe
+    Serial.print("EncoderPulses: ");
+    Serial.print(encoderPulses);
+    
+    Serial.print(" | indexPulses: ");
+    Serial.print(indexPulses); 
+    
+    Serial.print(" | Motor-Schritte: ");
+    Serial.print(absolutMotorSteps);
+
+    //if (!stepper.isRunning()) {
+      deviation();
+    //}
+  }
 }
-}
-
 
 void deviation () {
 
-// Encoder-Werte
-long encoderPulses = meinEncoder.read();
-long indexPulses = (short)meinEncoder.getRevolution();
+  // Encoder-Werte
+  long encoderPulses = meinEncoder.read();
+  long indexPulses = (short)meinEncoder.getRevolution();
 
-// Schrittmotor-Werte
-long absolutMotorSteps = stepper.currentPosition(); 
+  // Schrittmotor-Werte
+  long absolutMotorSteps = stepper.currentPosition(); 
 
-// Hardware-Konfigurationen Stepper and Encoder
-const long ENCODER_PULSES_PER_REV = 4000;   // Encoder-Quadraturauflösung
-const long STEPPER_STEPS_PER_REV = 1600;    // Stepmotor-Schritte pro Umdrehung
+  // Hardware-Konfigurationen Stepper and Encoder
+  const long ENCODER_PULSES_PER_REV = 4000;   // Encoder-Quadraturauflösung
+  const long STEPPER_STEPS_PER_REV = 1600;    // Stepmotor-Schritte pro Umdrehung
 
-float deviationFactor = STEPPER_STEPS_PER_REV / ENCODER_PULSES_PER_REV ; // current 13.07.2026 -> 1600/4000 Steps/Rev = 0,4
+  // Faktor/Verhältnis Encoder-Schritte zu Stepper-Schritte je volle Umdrehung - Hardwareabhängig 
+  float deviationFactor = (float)STEPPER_STEPS_PER_REV / (float)ENCODER_PULSES_PER_REV; // current 13.07.2026 -> 1600/4000 Steps/Rev = 0,4
 
-// float deviationThreshold = 4 ; // 16 stepperSteps = 0.01 mm -> minimum accuracy = 0.005mm -> +/- 0.0025mm = 4 Steps
-//float realDeviationFactor = absolutMotorSteps / (ENCODER_PULSES_PER_REV * indexPulses + encoderPulses);
+  // Tatsächliche und erwartete Encoder-Position
+  long currentAbsolutEncoderPosition = (indexPulses * ENCODER_PULSES_PER_REV) + encoderPulses ;
+  long targetAbsolutEncoderPosition = absolutMotorSteps / deviationFactor ;
 
-long currentAbsolutEncoderPosition;
+  // Erlaubte Abweichung vom Soll
+  // float deviationThreshold = 4 ; // 16 stepperSteps = 0.01 mm -> minimum accuracy = 0.005mm -> +/- 0.0025mm = 4 Steps
+  short currentDeviation = currentAbsolutEncoderPosition - targetAbsolutEncoderPosition ;
 
-long targetAbsolutEncoderPosition;
+  // Berechnung der Abweichung
+  // if (abs(currentAbsolutEncoderPosition - targetAbsolutEncoderPosition) > deviationThreshold) {
+  //   Serial.println("deviation to high. Axishoming necessary!");
+  // }
 
-if ()
+  // Ausgabe
+  Serial.print(" | Absolute-Soll-Encoderposition: ");
+  Serial.print(targetAbsolutEncoderPosition);
+  Serial.print(" | Absolute-Ist-Encoderposition: ");
+  Serial.print(currentAbsolutEncoderPosition);
+  Serial.print(" | Aktuelle Abweichung: ");
+  Serial.println(currentDeviation);
+}
 
+void axisHoming() {
+  // 1. Aktuellen Stand der Umdrehungen (Index) merken
+  long startingRevolution = meinEncoder.getRevolution();
+  
+  // 2. Motor sehr langsam in eine Richtung starten (z. B. 100 Schritte/Sekunde)
+  stepper.setSpeed(100); 
+
+  // 3. Solange fahren, bis sich der Index-Zähler verändert
+  while (meinEncoder.getRevolution() == startingRevolution) {
+    stepper.runSpeed();
+  }
+
+  // 4. Motor sofort stoppen
+  stepper.stop(); 
+  stepper.setCurrentPosition(0); 
+  delay(1000);
+
+  // 5. Encoder-Hardware komplett zurücksetzen (Nullt Pulse UND Index/Revolutions)
+  meinEncoder.init();
+  ENC1_REV = 0;
+  delay(100); 
+
+  // 6. 800 Schritte weiterfahren (eine halbe Umdrehung)
+  stepper.setMaxSpeed(200); 
+  stepper.runToNewPosition(800); 
+
+  // 7. Encoder-Positionszähler auf 800 setzen (synchron zum Stepper)
+  meinEncoder.write(2000);
+  stepper.setSpeed(1000);
+  stepper.setMaxSpeed(2000); 
 }
