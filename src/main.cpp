@@ -54,7 +54,10 @@ void setup() {
 
   meinEncoder.setInitConfig();
 
-  meinEncoder.EncConfig.INDEXTriggerMode = RISING_EDGE;
+  meinEncoder.EncConfig.enableModuloCountMode = 0;
+  meinEncoder.EncConfig.revolutionCountCondition = DISABLE;
+  meinEncoder.EncConfig.INDEXTriggerMode = 0;      // standardmäßig deaktiviert, wird nur beim Homing aktiv
+  meinEncoder.EncConfig.IndexTrigger = DISABLE;
 
   meinEncoder.init();
 
@@ -93,7 +96,7 @@ void loop() {
       if (cmd == "t") { // Test
         Serial.println("15.07.2026 / 11:18Uhr");
       }
-      else if (cmd == "help" || cmd == "?") {
+      else if (cmd == "help1" || cmd == "?") {
         Serial.println("Verfügbare Befehle:");
         Serial.println(" t            - Test");
         Serial.println(" a            - goto absolute position 10000 (demo)");
@@ -103,6 +106,29 @@ void loop() {
         Serial.println(" set <param> <value> - set parameters: maxspeed, accel, speed, position, target, enable, minpulse");
         Serial.println(" get <param>  - get parameters: maxspeed, accel, speed, position, target, distance, running, enabled");
         Serial.println(" p            - stop (decelerate)");
+      }
+      else if (cmd == "help2" || cmd == "?") {
+      	// Serial.printf("\tenableReverseDirection: %d\n",config->enableReverseDirection);
+	      // Serial.printf("\tdecoderWorkMode: %d\n",config->decoderWorkMode);
+	      // Serial.printf("\tHOMETriggerMode: %d\n",config->HOMETriggerMode);
+	      // Serial.printf("\tINDEXTriggerMode: %d\n",config->INDEXTriggerMode);
+	      // Serial.printf("\tIndexTrigger: %d\n",config->IndexTrigger);
+	      // Serial.printf("\tHomeTrigger: %d\n",config->HomeTrigger);	
+// 
+	      // Serial.printf("\tclearCounter: %d\n",config->clearCounter);
+	      // Serial.printf("\tclearHoldCounter: %d\n",config->clearHoldCounter);
+// 
+	      // Serial.printf("\tfilterCount: %d\n",config->filterCount);
+	      // Serial.printf("\tfilterSamplePeriod: %d\n",config->filterSamplePeriod);
+	      // Serial.printf("\tpositionCompareValue: %x\n",config->positionCompareValue);
+	      // Serial.printf("\trevolutionCountCondition: %d\n",config->revolutionCountCondition);
+	      // Serial.printf("\tenableModuloCountMode: %d\n",config->enableModuloCountMode);
+	      // Serial.printf("\tpositionModulusValue: %d\n", config->positionModulusValue);
+// 
+	      // Serial.printf("\tpositionInitialValue: %d\n",config->positionInitialValue);
+	      // Serial.printf("\tpositionROIE: %d\n",config->positionROIE);
+	      // Serial.printf("\tpositionRUIE: %x\n",config->positionRUIE);
+	      // Serial.printf("\n");
       }
       else if (cmd == "a") { // absolute Position 10 000
         Serial.println("Fahre zu absoluter Position: 16000");
@@ -246,7 +272,7 @@ void loop() {
 
     // Die Rohwerte aus der Hardware
     long encoderPulses = meinEncoder.read();
-    long indexPulses = (short)meinEncoder.getRevolution();
+    // long indexPulses = (short)meinEncoder.getRevolution(); 
     
     // Berechnungen Motor
     long absolutMotorSteps = stepper.currentPosition();
@@ -255,8 +281,8 @@ void loop() {
     Serial.print("EncoderPulses: ");
     Serial.print(encoderPulses);
     
-    Serial.print(" | indexPulses: ");
-    Serial.print(indexPulses); 
+    // Serial.print(" | indexPulses: ");
+    // Serial.print(indexPulses); 
     
     Serial.print(" | Motor-Schritte: ");
     Serial.print(absolutMotorSteps);
@@ -271,7 +297,7 @@ void deviation () {
 
   // Encoder-Werte
   long encoderPulses = meinEncoder.read();
-  long indexPulses = (short)meinEncoder.getRevolution();
+  // long indexPulses = (short)meinEncoder.getRevolution();
 
   // Schrittmotor-Werte
   long absolutMotorSteps = stepper.currentPosition(); 
@@ -284,7 +310,7 @@ void deviation () {
   float deviationFactor = (float)STEPPER_STEPS_PER_REV / (float)ENCODER_PULSES_PER_REV; // current 13.07.2026 -> 1600/4000 Steps/Rev = 0,4
 
   // Tatsächliche und erwartete Encoder-Position
-  long currentAbsolutEncoderPosition = (indexPulses * ENCODER_PULSES_PER_REV) + encoderPulses ;
+  long currentAbsolutEncoderPosition = encoderPulses ;
   long targetAbsolutEncoderPosition = absolutMotorSteps / deviationFactor ;
 
   // Erlaubte Abweichung vom Soll
@@ -299,40 +325,32 @@ void deviation () {
   // Ausgabe
   Serial.print(" | Absolute-Soll-Encoderposition: ");
   Serial.print(targetAbsolutEncoderPosition);
-  Serial.print(" | Absolute-Ist-Encoderposition: ");
-  Serial.print(currentAbsolutEncoderPosition);
   Serial.print(" | Aktuelle Abweichung: ");
   Serial.println(currentDeviation);
 }
 
 void axisHoming() {
-  // 1. Aktuellen Stand der Umdrehungen (Index) merken
-  long startingRevolution = meinEncoder.getRevolution();
-  
-  // 2. Motor sehr langsam in eine Richtung starten (z. B. 100 Schritte/Sekunde)
-  stepper.setSpeed(100); 
+  // Index-Trigger nur für das Homing aktivieren
+  meinEncoder.setInitConfig();                  // activate Index-Trigger-Mode
+  meinEncoder.EncConfig.INDEXTriggerMode = RISING_EDGE;
+  meinEncoder.EncConfig.IndexTrigger = true;
+  meinEncoder.init();
 
-  // 3. Solange fahren, bis sich der Index-Zähler verändert
-  while (meinEncoder.getRevolution() == startingRevolution) {
+  stepper.setSpeed(100);                                      // slow speed to find Index-Trigger
+  long startingRevolution = meinEncoder.getRevolution();      // take reference value from index-trigger ...
+  while (meinEncoder.getRevolution() == startingRevolution) { // ... and rotate stepper as long as value is changing
     stepper.runSpeed();
   }
 
-  // 4. Motor sofort stoppen
   stepper.stop(); 
   stepper.setCurrentPosition(0); 
+  meinEncoder.write(0);
   delay(1000);
+  stepper.setSpeed(1000);       // reset normal speed
+  stepper.setMaxSpeed(2000);
 
-  // 5. Encoder-Hardware komplett zurücksetzen (Nullt Pulse UND Index/Revolutions)
+  meinEncoder.setInitConfig();                  // deactivate Index-Trigger-Mode
+  meinEncoder.EncConfig.INDEXTriggerMode = 0;   
+  meinEncoder.EncConfig.IndexTrigger = false;
   meinEncoder.init();
-  ENC1_REV = 0;
-  delay(100); 
-
-  // 6. 800 Schritte weiterfahren (eine halbe Umdrehung)
-  stepper.setMaxSpeed(200); 
-  stepper.runToNewPosition(800); 
-
-  // 7. Encoder-Positionszähler auf 800 setzen (synchron zum Stepper)
-  meinEncoder.write(2000);
-  stepper.setSpeed(1000);
-  stepper.setMaxSpeed(2000); 
 }
