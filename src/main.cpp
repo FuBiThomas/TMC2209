@@ -25,8 +25,6 @@
 #define EN_PIN 9         // LOW = Aktiv, HIGH = Deaktiviert
 #define STEP_PIN 10      // Step pin
 #define DIR_PIN 11       // Direction pin
-// Encoder index input
-#define INDEX_PIN 2      // Index signal (Z) des Encoders
 
 // Mechanische Umrechnung
 const long ENCODER_PULSES_PER_REV = 4000;   // Encoder-Quadraturauflösung
@@ -36,7 +34,7 @@ const float SPINDLE_LEAD_MM_PER_REV = 1.0;  // Spindel-Steigung in mm pro Umdreh
 // AccelStepper Instanz im Driver-Modus
 AccelStepper stepper(AccelStepper::DRIVER, STEP_PIN, DIR_PIN);
 
-QuadEncoder meinEncoder(1, 0, 1, 0, 4); // Hardware-Modul 1: Phase A an Pin 0, Phase B an Pin 1
+QuadEncoder meinEncoder(2, 2, 3, 0, 4); // Hardware-Modul 1: Phase A an Pin 0, Phase B an Pin 1
 
 //Zeitsteuerung für die serielle Ausgabe (alle 100 Millisekunden)
 unsigned long letzteAusgabeZeit = 0;
@@ -60,9 +58,6 @@ void setup() {
   meinEncoder.EncConfig.IndexTrigger = DISABLE;
 
   meinEncoder.init();
-
-  // Index-Pin konfigurieren (Pullup für sauberen Zustand, je nach Sensor anpassen)
-  pinMode(INDEX_PIN, INPUT_PULLDOWN);
 
   // Dem Stepper mitteilen, welcher Pin für Enable zuständig ist
   // Das 'true' am Ende ist entscheidend: Es invertiert das Signal! (LOW = Aktiv)
@@ -94,7 +89,7 @@ void loop() {
       args.trim();
 
       if (cmd == "t") { // Test
-        Serial.println("15.07.2026 / 11:18Uhr");
+        Serial.println("21.07.2026 #2");
       }
       else if (cmd == "help1" || cmd == "?") {
         Serial.println("Verfügbare Befehle:");
@@ -272,7 +267,7 @@ void loop() {
 
     // Die Rohwerte aus der Hardware
     long encoderPulses = meinEncoder.read();
-    // long indexPulses = (short)meinEncoder.getRevolution(); 
+    long indexPulses = (short)meinEncoder.getRevolution(); 
     
     // Berechnungen Motor
     long absolutMotorSteps = stepper.currentPosition();
@@ -281,8 +276,8 @@ void loop() {
     Serial.print("EncoderPulses: ");
     Serial.print(encoderPulses);
     
-    // Serial.print(" | indexPulses: ");
-    // Serial.print(indexPulses); 
+    Serial.print(" | indexPulses: ");
+    Serial.print(indexPulses); 
     
     Serial.print(" | Motor-Schritte: ");
     Serial.print(absolutMotorSteps);
