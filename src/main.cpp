@@ -42,7 +42,7 @@ const float SPINDLE_LEAD_MM_PER_REV = 1.0;  // Spindel-Steigung in mm pro Umdreh
 AccelStepper STEPPER_AXIS(AccelStepper::DRIVER, STEP_PIN_AXIS, DIR_PIN_AXIS);
 AccelStepper STEPPER_FILTER(AccelStepper::DRIVER, STEP_PIN_FILTER, DIR_PIN_FILTER);
 
-QuadEncoder ENCODER_AXIS(2, 2, 3, 0, 4); // Hardware-Modul 1: Phase A an Pin 0, Phase B an Pin 1
+QuadEncoder ENCODER_AXIS(2, 2, 3, 1, 4); // ENC2: Phase A/B an Pins 2/3, Pull-ups aktiv, Index an Pin 4
 QuadEncoder ENCODER_FILTER(4, 7, 8, 0); // Hardware-Modul 4: Phase A an Pin 7, Phase B an Pin 8, kein Index
 
 //Zeitsteuerung für die serielle Ausgabe (alle 100 Millisekunden)
@@ -51,11 +51,16 @@ const unsigned long ausgabeIntervall = 1000;
   
 // Laufzeitzustand für get/set Befehle
 bool outputsEnabled = true;
-float currentAcceleration = 500.0; // spiegelt zuletzt gesetzte Acceleration wider
+float currentSpeed = 500.0; // maximale Fahrgeschwindigkeit in Steps/s
+float currentAcceleration = 500.0; // Beschleunigung in Steps/s^2
+bool continuousRotation = false;
+int continuousRotationDirection = 1;
 
 void deviationAxis ();
 void homingAxis();
 void homesensor(int state);
+void startContinuousRotation(int direction);
+void updateContinuousRotation();
 
 void setup() {
   Serial.begin(9600); 
@@ -88,13 +93,11 @@ void setup() {
   STEPPER_FILTER.enableOutputs();
 
   // Parameter setzen
-  STEPPER_AXIS.setMaxSpeed(10000);     // max Geschwindigkeit
-  STEPPER_AXIS.setSpeed(6000);
-  STEPPER_AXIS.setAcceleration(6000);  // Beschleunigung
+  STEPPER_AXIS.setMaxSpeed(currentSpeed);
+  STEPPER_AXIS.setAcceleration(currentAcceleration);
 
-  STEPPER_FILTER.setMaxSpeed(10000);
-  STEPPER_FILTER.setSpeed(6000);
-  STEPPER_FILTER.setAcceleration(6000);
+  STEPPER_FILTER.setMaxSpeed(currentSpeed);
+  STEPPER_FILTER.setAcceleration(currentAcceleration);
 
   STEPPER_AXIS.setCurrentPosition(0); // Startposition kalibrieren
   STEPPER_FILTER.setCurrentPosition(0); // Filter-Startposition kalibrieren
@@ -104,7 +107,7 @@ void setup() {
   digitalWrite(HOMESENSOR_IN1_PIN, LOW);
   digitalWrite(HOMESENSOR_IN2_PIN, LOW);
 
-  Serial.println("System bereit. Warte auf Befehle (t, a, h, r, p, g, homesensor)...");
+  Serial.println("System bereit. Befehle: spin [+|-] fuer Dauerdrehung, p zum Stoppen.");
 }
 
 void loop() {
@@ -119,7 +122,7 @@ void loop() {
       args.trim();
 
       if (cmd == "t") { // Test
-        Serial.println("24.07.2026 #1");
+        Serial.println("06.11.2026 #2");
       }
       else if (cmd == "help" || cmd == "?") {
         Serial.println("Verfügbare Befehle:");
@@ -128,15 +131,18 @@ void loop() {
         Serial.println(" h            - go home (position 0)");
         Serial.println(" r            - move relative (predefined 800)");
         Serial.println(" g<steps>     - move relative by steps (z.B. g1000 oder g 1000)");
-        Serial.println(" set <param> <value> - set parameters: maxspeed, accel, speed, position, target, enable, minpulse");
-        Serial.println(" get <param>  - get parameters: maxspeed, accel, speed, position, target, distance, running, enabled");
+        Serial.println(" spin [+|-]   - Motor dauerhaft drehen lassen; 'p' stoppt");
+        Serial.println(" set <param> <value> - set: speed/maxspeed (Steps/s), accel (Steps/s^2), position, target, enable, minpulse");
+        Serial.println(" get <param>  - get: speed/maxspeed, actualspeed, accel, position, target, distance, running, enabled");
         Serial.println(" p            - stop (decelerate)");
       }
       else if (cmd == "a") { // absolute Position 10 000
+        continuousRotation = false;
         Serial.println("Fahre zu absoluter Position: 16000");
         STEPPER_AXIS.moveTo(16000); 
       }
       else if (cmd == "home") { // home position
+        continuousRotation = false;
         Serial.println("Fahre zu Home-Position: 0");
         STEPPER_AXIS.moveTo(0); 
       }
@@ -149,42 +155,52 @@ void loop() {
         ENCODER_AXIS.write(0);                               // Setzt den aktuellen Pulscounter zurück auf 0; 
       }
       else if (cmd == "homingAxis") { // home position
-      Serial.println("Start axis homing ... ");
-      homingAxis (); 
+        continuousRotation = false;
+        Serial.println("Start axis homing ... ");
+        homingAxis ();
       }
       else if (cmd == "1") {
+        continuousRotation = false;
         Serial.println("Fahre relativ: +100 Steps");
         STEPPER_AXIS.move(100);
       }
       else if (cmd == "2") {
+        continuousRotation = false;
         Serial.println("Fahre relativ: +200 Steps");
         STEPPER_AXIS.move(200);
       }
       else if (cmd == "3") {
+        continuousRotation = false;
         Serial.println("Fahre relativ: +300 Steps");
         STEPPER_AXIS.move(300);
       }
       else if (cmd == "4") {
+        continuousRotation = false;
         Serial.println("Fahre relativ: +400 Steps");
         STEPPER_AXIS.move(400);
       }
       else if (cmd == "6") {
+        continuousRotation = false;
         Serial.println("Fahre relativ: -100 Steps");
         STEPPER_AXIS.move(-100);
       }
       else if (cmd == "7") {
+        continuousRotation = false;
         Serial.println("Fahre relativ: -200 Steps");
         STEPPER_AXIS.move(-200);
       }
       else if (cmd == "8") {
+        continuousRotation = false;
         Serial.println("Fahre relativ: -300 Steps");
         STEPPER_AXIS.move(-300);
       }
       else if (cmd == "9") {
+        continuousRotation = false;
         Serial.println("Fahre relativ: -400 Steps");
         STEPPER_AXIS.move(-400);
       }      
       else if (cmd == "g") { // move relative with parameter
+        continuousRotation = false;
         long steps = 0;
         if (args.length() > 0) steps = args.toInt();
         // support g1000 without space
@@ -209,6 +225,13 @@ void loop() {
           Serial.println("Fehler: homesensor erwartet 0 oder 1");
         }
       }
+      else if (cmd == "spin") {
+        if (args.length() == 0 || args == "+" || args == "-") {
+          startContinuousRotation(args == "-" ? -1 : 1);
+        } else {
+          Serial.println("Fehler: Verwendung: spin [+|-]");
+        }
+      }
       else if (cmd == "set") {
         int sp2 = args.indexOf(' ');
         String param = (sp2 == -1) ? args : args.substring(0, sp2);
@@ -216,23 +239,27 @@ void loop() {
         param.toLowerCase();
         val.trim();
 
-        if (param == "maxspeed") {
+        if (param == "maxspeed" || param == "speed") {
           float v = val.toFloat();
-          if (v > 0) { STEPPER_AXIS.setMaxSpeed(v); Serial.print("maxSpeed gesetzt: "); Serial.println(v, 2); }
-          else Serial.println("Ungültiger Wert für maxspeed");
+          if (v > 0) {
+            currentSpeed = v;
+            STEPPER_AXIS.setMaxSpeed(currentSpeed);
+            Serial.print("Speed (maximal, Steps/s) gesetzt: ");
+            Serial.println(currentSpeed, 2);
+          }
+          else Serial.println("Ungültiger Wert für speed: bitte einen Wert größer 0 in Steps/s angeben");
         }
         else if (param == "accel" || param == "acceleration") {
           float v = val.toFloat();
           if (v > 0) { STEPPER_AXIS.setAcceleration(v); currentAcceleration = v; Serial.print("Acceleration gesetzt: "); Serial.println(v, 2); }
           else Serial.println("Ungültiger Wert für acceleration");
         }
-        else if (param == "speed") {
-          float v = val.toFloat(); STEPPER_AXIS.setSpeed(v); Serial.print("Speed gesetzt: "); Serial.println(v, 2);
-        }
         else if (param == "position" || param == "pos") {
+          continuousRotation = false;
           long v = val.toInt(); STEPPER_AXIS.setCurrentPosition(v); Serial.print("Position gesetzt: "); Serial.println(v);
         }
         else if (param == "target") {
+          continuousRotation = false;
           long v = val.toInt(); STEPPER_AXIS.moveTo(v); Serial.print("Target gesetzt (moveTo): "); Serial.println(v);
         }
         else if (param == "enable") {
@@ -250,9 +277,9 @@ void loop() {
       else if (cmd == "get") {
         String param = args;
         param.toLowerCase();
-        if (param == "maxspeed") { Serial.print("maxSpeed: "); Serial.println(STEPPER_AXIS.maxSpeed(), 2); }
+        if (param == "maxspeed" || param == "speed") { Serial.print("speed (maximal, Steps/s): "); Serial.println(currentSpeed, 2); }
         else if (param == "accel" || param == "acceleration") { Serial.print("acceleration: "); Serial.println(currentAcceleration, 2); }
-        else if (param == "speed") { Serial.print("speed: "); Serial.println(STEPPER_AXIS.speed(), 2); }
+        else if (param == "actualspeed") { Serial.print("actual speed (Steps/s): "); Serial.println(STEPPER_AXIS.speed(), 2); }
         else if (param == "position" || param == "pos") { Serial.print("currentPosition: "); Serial.println(STEPPER_AXIS.currentPosition()); }
         else if (param == "target") { Serial.print("targetPosition: "); Serial.println(STEPPER_AXIS.targetPosition()); }
         else if (param == "distance") { Serial.print("distanceToGo: "); Serial.println(STEPPER_AXIS.distanceToGo()); }
@@ -264,6 +291,7 @@ void loop() {
       }
       else if (cmd == "p") { // Stop
         Serial.println("Stop-Befehl empfangen");
+        continuousRotation = false;
         STEPPER_AXIS.stop();
       }
       else {
@@ -273,6 +301,7 @@ void loop() {
     }
   }
   // Wichtig: Muss völlig frei laufen können
+  updateContinuousRotation();
   STEPPER_AXIS.run();
   STEPPER_FILTER.run();
 
@@ -312,6 +341,29 @@ void loop() {
     //if (!stepper.isRunning()) {
       deviationAxis();
     //}
+  }
+}
+
+void startContinuousRotation(int direction) {
+  continuousRotationDirection = direction < 0 ? -1 : 1;
+  continuousRotation = true;
+  STEPPER_AXIS.moveTo(STEPPER_AXIS.currentPosition() +
+                      continuousRotationDirection * 100000L);
+  Serial.print("Dauerdrehung gestartet mit ");
+  Serial.print(continuousRotationDirection * currentSpeed, 2);
+  Serial.println(" Steps/s; 'p' stoppt.");
+}
+
+void updateContinuousRotation() {
+  if (!continuousRotation) {
+    return;
+  }
+
+  long distanceToTarget = STEPPER_AXIS.distanceToGo();
+  if ((continuousRotationDirection > 0 && distanceToTarget <= 50000L) ||
+      (continuousRotationDirection < 0 && distanceToTarget >= -50000L)) {
+    STEPPER_AXIS.moveTo(STEPPER_AXIS.currentPosition() +
+                        continuousRotationDirection * 100000L);
   }
 }
 
@@ -358,7 +410,8 @@ void homingAxis() {
   ENCODER_AXIS.EncConfig.IndexTrigger = true;
   ENCODER_AXIS.init();
 
-  STEPPER_AXIS.setSpeed(100);                                      // slow speed to find Index-Trigger
+  STEPPER_AXIS.setMaxSpeed(100);
+  STEPPER_AXIS.setSpeed(100); // runSpeed() uses this temporary homing speed
   long startingRevolution = ENCODER_AXIS.getRevolution();      // take reference value from index-trigger ...
   while (ENCODER_AXIS.getRevolution() == startingRevolution) { // ... and rotate stepper as long as value is changing
     STEPPER_AXIS.runSpeed();
@@ -368,8 +421,7 @@ void homingAxis() {
   STEPPER_AXIS.setCurrentPosition(0); 
   ENCODER_AXIS.write(0);
   delay(1000);
-  STEPPER_AXIS.setSpeed(1000);       // reset normal speed
-  STEPPER_AXIS.setMaxSpeed(2000);
+  STEPPER_AXIS.setMaxSpeed(currentSpeed); // restore the configured travel speed
 
   ENCODER_AXIS.setInitConfig();                  // deactivate Index-Trigger-Mode
   ENCODER_AXIS.EncConfig.INDEXTriggerMode = 0;   
